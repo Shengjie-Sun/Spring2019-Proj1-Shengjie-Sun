@@ -1,0 +1,50 @@
+---
+title: "Text Mining of HappyDB"
+author: "Shengjie Sun (ss5593)"
+date: "February 6, 2019"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+### Step 0 - Load all the required Libraries
+
+```{r load libraries, warning=FALSE, message=FALSE}
+library(tidytext)
+library(tidyverse)
+```
+
+### Step 1 - Load the cleaned and processed data
+
+```{r read data, warning=FALSE, message=FALSE}
+hm_tbl <- read.csv("../output/processed_moments_modified.csv", stringsAsFactors=FALSE) %>% as.tibble()
+```
+
+```{r}
+hm_tbl %>% count(reflection_period)
+```
+```{r}
+a <- hm_tbl %>% filter(wid==1)
+b <- hm_tbl %>% filter(wid==2)
+```
+
+```{r, warning=FALSE, message=FALSE}
+hm_token <- hm_tbl %>% 
+  unnest_tokens(word, original_hm) %>%
+  inner_join(get_sentiments("afinn"), by="word") %>%
+  mutate(age = as.numeric(age)) %>%
+  filter(age>17, age<=100, !is.na(age)) %>%
+  group_by(age, reflection_period) %>%
+  summarise(mean = mean(score)) %>%
+  filter(mean>0) %>%
+  spread(., key = reflection_period, value = mean) %>% 
+  mutate(Difference = `3m`-`24h`, Direction=ifelse(Difference>0, "3m", "24h"))
+```
+
+```{r, warning=FALSE, message=FALSE}
+ggplot(hm_token, aes(x=age, y=Difference, fill=Direction)) +
+  geom_col()
+```
+
