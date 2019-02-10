@@ -2,49 +2,204 @@
 title: "Text Mining of HappyDB"
 author: "Shengjie Sun (ss5593)"
 date: "February 6, 2019"
-output: html_document
+output: html_notebook
 ---
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
+## Preparation
+
 ### Step 0 - Load all the required Libraries
 
 ```{r load libraries, warning=FALSE, message=FALSE}
 library(tidytext)
 library(tidyverse)
+library(tidyr)
+library(tm)
+
+library(topicmodels)
+library(LDAvis)
+library(slam)
+library(servr)
+library(gridExtra)
+library(ggridges)
 ```
 
 ### Step 1 - Load the cleaned and processed data
 
+Considering the conciseness, all of the text preprocessing part are done in `Text_Processing_Modified.rmd` and the data we use here is called `processed_moments_modified.csv` saved in `output`. 
+
 ```{r read data, warning=FALSE, message=FALSE}
 hm_tbl <- read.csv("../output/processed_moments_modified.csv", stringsAsFactors=FALSE) %>% as.tibble()
+hm_tbl_re <- hm_tbl %>% mutate(age = ifelse(age >= 75, 75, age))
+
+Corpus <- hm_tbl_re$text %>% VectorSource() %>% VCorpus()
+dtm <- Corpus %>% DocumentTermMatrix()
 ```
 
-```{r}
-hm_tbl %>% count(reflection_period)
-```
-```{r}
-a <- hm_tbl %>% filter(wid==1)
-b <- hm_tbl %>% filter(wid==2)
+## Happiness V.S. Age
+- Motivation: Happiness is a kind of emotion of people while the age is a character that changes with the time goes by. With the increasing of age, the knowledge, status and personality will change dynamically. 
+- Goal: The main goal of this part is to analysis, how the pattern of happiness changes with the increasing of age.
+
+### Question 1 - Demographic bias
+```{r Create the demographic tibble, warning=FALSE, message=FALSE}
+dem_tbl <- hm_tbl %>% count(age, gender, marital, parenthood)
+dem_tbl_re <- dem_tbl %>% mutate(age = ifelse(age >= 75, 75, age))
 ```
 
 ```{r, warning=FALSE, message=FALSE}
-hm_token <- hm_tbl %>% 
-  unnest_tokens(word, original_hm) %>%
+dem_tbl %>% 
+  group_by(age, gender) %>% 
+  summarise(percent = sum(n)) %>% 
+  mutate(percent = percent/sum(percent)) %>%
+  ggplot(aes(x = age, y = percent, fill = gender)) + 
+  geom_col(position = "stack", width=0.8)
+```
+
+```{r, warning=FALSE, message=FALSE}
+dem_tbl_re %>% 
+  group_by(age, gender) %>% 
+  summarise(percent = sum(n)) %>% 
+  mutate(percent = percent/sum(percent)) %>%
+  ggplot(aes(x = age, y = percent, fill = gender)) + 
+  geom_col(position = "stack", width=0.87)
+```
+```{r, warning=FALSE, message=FALSE}
+dem_tbl_re %>% 
+  group_by(age, marital) %>% 
+  summarise(percent = sum(n)) %>% 
+  mutate(percent = percent/sum(percent)) %>%
+  ggplot(aes(x = age, y = percent, fill = marital)) + 
+  geom_col(position = "stack", width=0.8)
+```
+```{r, warning=FALSE, message=FALSE}
+dem_tbl_re %>% 
+  group_by(age, parenthood) %>% 
+  summarise(percent = sum(n)) %>% 
+  mutate(percent = percent/sum(percent)) %>%
+  ggplot(aes(x = age, y = percent, fill = parenthood)) + 
+  geom_col(position = "stack", width=0.87)
+```
+
+### Question 2 - Single Value Index
+```{r, warning=FALSE, message=FALSE}
+hm_token <- hm_tbl_re %>%
+  unnest_tokens(word, text) %>%
   inner_join(get_sentiments("afinn"), by="word") %>%
-  mutate(age = as.numeric(age)) %>%
-  filter(age>17, age<=100, !is.na(age)) %>%
-  group_by(age, reflection_period) %>%
-  summarise(mean = mean(score)) %>%
-  filter(mean>0) %>%
-  spread(., key = reflection_period, value = mean) %>% 
-  mutate(Difference = `3m`-`24h`, Direction=ifelse(Difference>0, "3m", "24h"))
+  mutate(score = abs(score))
 ```
 
+
 ```{r, warning=FALSE, message=FALSE}
-ggplot(hm_token, aes(x=age, y=Difference, fill=Direction)) +
-  geom_col()
+hm_token %>%
+  mutate(score = abs(score), age = plyr::round_any(age+5, 10)) %>%
+  group_by(age) %>%
+  mutate(mean = mean(score)) %>%
+  ggplot() + 
+  geom_jitter(aes(x = factor(age), y = score), alpha = 0.06) + 
+  geom_point(aes(x = factor(age), y = mean), color="red", shape="*", size = 7) +
+  labs(x = "Range of Age", 
+       y = "Scatter of scores")
+
+hm_token %>%
+  mutate(score = abs(score), age = plyr::round_any(age, 10)) %>%
+  ggplot(aes(x = score, y = factor(age))) + 
+  geom_density_ridges(aes(x = score, y = factor(age))) + 
+  labs(x = "Density of scores", 
+       y = "Range of Age")
+```
+
+
+```{r}
+hm_tbl_re %>% 
+  count(age, predicted_category) %>% 
+  group_by(age, predicted_category) %>%
+  summarise(percent = sum(n)) %>% 
+  mutate(percent = percent/sum(percent)) %>%
+  ggplot(aes(x = age, y = percent, fill = predicted_category)) + 
+  geom_col(position = "stack", width=0.8)
+```
+```{r}
+hm_tbl_re %>% 
+  count(age, predicted_category) %>% 
+  group_by(age, predicted_category) %>%
+  summarise(percent = sum(n)) %>% 
+  mutate(percent = percent/sum(percent)) %>%
+  ggplot(aes(x = age, y = percent, color = predicted_category)) + 
+  geom_line()
+```
+
+```{r}
+burnin <- 500
+iter <- 1000
+keep <- 30
+
+k <- 7
+
+mods <- LDA(dtm, k, 
+            method = "Gibbs",
+            control = list(burnin = burnin,
+                           iter = iter,
+                           keep = keep))
+
+
+```
+
+
+```{r}
+topics <- as.matrix(topics(mods))
+terms <- as.matrix(terms(mods,10))
+```
+
+
+```{r}
+# Find required quantities
+phi <- as.matrix(posterior(mods)$terms)
+theta <- as.matrix(posterior(mods)$topics)
+vocab <- colnames(phi)
+term_freq <- col_sums(dtm)
+
+# Convert to json
+json_lda <- createJSON(phi = phi, 
+                       theta = theta,
+                       vocab = vocab,
+                       doc.length = as.vector(table(dtm$i)),
+                       term.frequency = term_freq)
+
+serVis(json_lda)
+```
+
+```{r}
+# serVis(json_lda, out.dir = "doc", open.browser = FALSE)
+```
+
+```{r}
+serVis(json_lda, out.dir = 'LDA_visual', open.browser = FALSE)
+system("mv index.html results.html")
+```
+
+```{r}
+temp <- hm_tbl_re %>% mutate(topics = topics)
+```
+
+```{r}
+temp %>% 
+  count(age, topics) %>% 
+  group_by(age, topics) %>%
+  summarise(percent = sum(n)) %>% 
+  mutate(percent = percent/sum(percent)) %>%
+  ggplot(aes(x = age, y = percent, fill = factor(topics))) + 
+  geom_col(position = "stack", width=0.8)
+```
+```{r}
+temp %>% 
+  count(age, topics) %>% 
+  group_by(age, topics) %>%
+  summarise(percent = sum(n)) %>% 
+  mutate(percent = percent/sum(percent)) %>%
+  ggplot(aes(x = age, y = percent, color = factor(topics))) + 
+  geom_line()
 ```
 
