@@ -10,9 +10,16 @@ This is the first and only *individual* (as opposed to *team*) this semester.
 Term: Spring 2019
 
 + Projec title: Lorem ipsum dolor sit amet
+
 + This project is conducted by Shengjie Sun
 
-+ Project summary:  My project focus on how the pattern of happiness changes with the increasing of ages.  
++ Project summary:  My project focus on how the pattern of happiness changes with the increasing of ages:
+
+  [1]: Demographic Information v.s. Age
+
+  [2]: Single Value Index v.s. Age
+
+  [3]: Topic Modelling v.s. age
 
 Following [suggestions](http://nicercode.github.io/blog/2013-04-05-projects/) by [RICH FITZJOHN](http://nicercode.github.io/about/#Team) (@richfitz). This folder is orgarnized as follows.
 
