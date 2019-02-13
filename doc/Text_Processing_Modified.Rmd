@@ -151,14 +151,13 @@ hm_data <- hm_data %>%
 
 ### Step 12 - Remove some useless columns and rows
 
-```{r}
+```{r clean columns and rows, warning=FALSE, message=FALSE}
 hm_data <- hm_data %>%
   select(-ground_truth_category, -modified) %>%
   drop_na(age, gender, marital, parenthood) %>%
   filter(!nchar(text)<3) %>%
   filter(text != "tv tv")
 ```
-
 
 ### Step 13 - Exporting the processed text data into a CSV file
 
